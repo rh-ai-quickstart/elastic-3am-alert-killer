@@ -1,0 +1,23 @@
+Thanks for installing {{ .Chart.Name }} ({{ .Chart.Version }}).
+
+Release:    {{ .Release.Name }}
+Namespace:  {{ include "easre.namespace" . }}
+
+Next steps:
+
+1. Verify pods are running:
+     oc get pods -n {{ include "easre.namespace" . }} -l app.kubernetes.io/part-of=elastic-autonomous-sre
+
+2. Get the payment-service route (used to inject failures):
+     oc get route payment-service -n {{ include "easre.namespace" . }} -o jsonpath='{.spec.host}'
+
+3. Get the remediation-agent route (referenced by the Elastic workflow):
+     oc get route remediation-agent -n {{ include "easre.namespace" . }} -o jsonpath='{.spec.host}'
+
+4. Configure your Elastic Cloud workflow with that agent URL:
+     workflows/3am-alert-killer.yaml -> remediation_agent_url
+
+5. Trigger an incident:
+     curl -sk -X POST "https://<payment-route>/admin/fail/latency?delay_ms=5000"
+
+See the README for the full demo runbook.

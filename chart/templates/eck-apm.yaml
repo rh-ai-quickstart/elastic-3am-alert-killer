@@ -1,0 +1,34 @@
+{{- if and .Values.eck.enabled .Values.eck.apm.enabled }}
+{{- $ns := include "easre.namespace" . -}}
+apiVersion: apm.k8s.elastic.co/v1
+kind: ApmServer
+metadata:
+  name: {{ include "easre.stackName" . }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "easre.labels" (dict "name" "apm-server" "root" .) | nindent 4 }}
+spec:
+  version: {{ .Values.eck.version | quote }}
+  count: {{ .Values.eck.apm.replicas }}
+  elasticsearchRef:
+    name: {{ include "easre.stackName" . }}
+  kibanaRef:
+    name: {{ include "easre.stackName" . }}
+  http:
+    tls:
+      selfSignedCertificate:
+        disabled: {{ not .Values.eck.apm.httpTLS }}
+  # Demo posture: allow unauthenticated OTLP submissions from in-cluster apps.
+  # For production, replace with a secret_token and ship that token to clients
+  # via a Kubernetes secret.
+  config:
+    apm-server.auth.anonymous.enabled: true
+    apm-server.auth.anonymous.allow_agent: ["*"]
+    apm-server.auth.anonymous.allow_service: ["*"]
+  podTemplate:
+    spec:
+      containers:
+        - name: apm-server
+          resources:
+            {{- toYaml .Values.eck.apm.resources | nindent 12 }}
+{{- end }}

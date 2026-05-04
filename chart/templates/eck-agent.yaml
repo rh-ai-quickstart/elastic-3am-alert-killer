@@ -1,0 +1,167 @@
+{{- if and .Values.eck.enabled .Values.eck.agent.enabled }}
+{{- $ns := include "easre.namespace" . -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "easre.agentName" . }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "easre.labels" (dict "name" "elastic-agent" "root" .) | nindent 4 }}
+---
+# ClusterRole + ClusterRoleBinding are required for the agent to read
+# kubelet metrics across nodes. This makes the chart NOT compatible with the
+# Developer Sandbox; install on ROSA / self-managed OpenShift.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "easre.agentName" . }}-{{ $ns }}
+  labels:
+    {{- include "easre.labels" (dict "name" "elastic-agent" "root" .) | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "nodes", "namespaces", "events", "services", "configmaps"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "create", "update"]
+  - nonResourceURLs: ["/metrics"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["nodes/metrics", "nodes/stats", "nodes/proxy"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "easre.agentName" . }}-{{ $ns }}
+  labels:
+    {{- include "easre.labels" (dict "name" "elastic-agent" "root" .) | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "easre.agentName" . }}
+    namespace: {{ $ns }}
+roleRef:
+  kind: ClusterRole
+  name: {{ include "easre.agentName" . }}-{{ $ns }}
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: agent.k8s.elastic.co/v1alpha1
+kind: Agent
+metadata:
+  name: {{ include "easre.agentName" . }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "easre.labels" (dict "name" "elastic-agent" "root" .) | nindent 4 }}
+spec:
+  version: {{ .Values.eck.version | quote }}
+  elasticsearchRefs:
+    - name: {{ include "easre.stackName" . }}
+  daemonSet:
+    podTemplate:
+      spec:
+        automountServiceAccountToken: true
+        serviceAccountName: {{ include "easre.agentName" . }}
+        containers:
+          - name: agent
+            resources:
+              {{- toYaml .Values.eck.agent.resources | nindent 14 }}
+            volumeMounts:
+              - name: varlog
+                mountPath: /var/log
+                readOnly: true
+              - name: varlibdockercontainers
+                mountPath: /var/lib/docker/containers
+                readOnly: true
+        volumes:
+          - name: varlog
+            hostPath:
+              path: /var/log
+          - name: varlibdockercontainers
+            hostPath:
+              path: /var/lib/docker/containers
+  config:
+    id: elastic-agent-kubernetes
+    revision: 1
+    agent:
+      monitoring:
+        enabled: true
+        use_output: default
+    inputs:
+      - id: kubernetes-metrics
+        type: kubernetes/metrics
+        data_stream.namespace: default
+        use_output: default
+        streams:
+          - data_stream:
+              type: metrics
+              dataset: kubernetes.pod
+            metricsets: ["pod"]
+            period: 30s
+            hosts: ["https://${env.NODE_NAME}:10250"]
+            bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+            ssl.verification_mode: none
+          - data_stream:
+              type: metrics
+              dataset: kubernetes.container
+            metricsets: ["container"]
+            period: 30s
+            hosts: ["https://${env.NODE_NAME}:10250"]
+            bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+            ssl.verification_mode: none
+          - data_stream:
+              type: metrics
+              dataset: kubernetes.node
+            metricsets: ["node"]
+            period: 30s
+            hosts: ["https://${env.NODE_NAME}:10250"]
+            bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+            ssl.verification_mode: none
+      - id: kubernetes-state
+        type: kubernetes/metrics
+        data_stream.namespace: default
+        use_output: default
+        streams:
+          - data_stream:
+              type: metrics
+              dataset: kubernetes.state_pod
+            metricsets: ["state_pod"]
+            period: 30s
+          - data_stream:
+              type: metrics
+              dataset: kubernetes.state_container
+            metricsets: ["state_container"]
+            period: 30s
+          - data_stream:
+              type: metrics
+              dataset: kubernetes.state_deployment
+            metricsets: ["state_deployment"]
+            period: 30s
+      - id: kubernetes-events
+        type: kubernetes/metrics
+        data_stream.namespace: default
+        use_output: default
+        streams:
+          - data_stream:
+              type: metrics
+              dataset: kubernetes.event
+            metricsets: ["event"]
+            period: 30s
+      - id: kubernetes-logs
+        type: filestream
+        data_stream.namespace: default
+        use_output: default
+        streams:
+          - data_stream:
+              type: logs
+              dataset: kubernetes.container_logs
+            paths:
+              - /var/log/containers/*.log
+            parsers:
+              - container: ~
+{{- end }}

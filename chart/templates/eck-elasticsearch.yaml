@@ -1,0 +1,41 @@
+{{- if .Values.eck.enabled }}
+{{- $ns := include "easre.namespace" . -}}
+apiVersion: elasticsearch.k8s.elastic.co/v1
+kind: Elasticsearch
+metadata:
+  name: {{ include "easre.stackName" . }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "easre.labels" (dict "name" "elastic-stack" "root" .) | nindent 4 }}
+spec:
+  version: {{ .Values.eck.version | quote }}
+  nodeSets:
+    - name: default
+      count: {{ .Values.eck.elasticsearch.nodeCount }}
+      config:
+        node.store.allow_mmap: false
+        node.roles:
+          - master
+          - data
+          - ingest
+          - ml
+          - transform
+      podTemplate:
+        spec:
+          containers:
+            - name: elasticsearch
+              resources:
+                {{- toYaml .Values.eck.elasticsearch.resources | nindent 16 }}
+      volumeClaimTemplates:
+        - metadata:
+            name: elasticsearch-data
+          spec:
+            accessModes:
+              - ReadWriteOnce
+            resources:
+              requests:
+                storage: {{ .Values.eck.elasticsearch.storage.size }}
+            {{- with .Values.eck.elasticsearch.storage.storageClassName }}
+            storageClassName: {{ . }}
+            {{- end }}
+{{- end }}

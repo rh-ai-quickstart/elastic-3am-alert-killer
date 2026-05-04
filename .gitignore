@@ -1,0 +1,10 @@
+*.pyc
+__pycache__/
+.venv/
+.env
+*.tgz
+chart/charts/
+chart/Chart.lock
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,170 @@
+# =============================================================================
+# elastic-autonomous-sre - Helm values
+# =============================================================================
+# This chart deploys the Elastic Stack (via ECK Custom Resources) AND the
+# demo workloads (payment-service, payment-loadgen, remediation-agent) into
+# a single OpenShift namespace.
+#
+# Prerequisite: the ECK operator must be installed cluster-wide. See
+# manifests/eck-operator.yaml in this repo.
+# =============================================================================
+
+# Resolved at render time; defaults to the Helm release namespace.
+namespaceOverride: ""
+
+# -----------------------------------------------------------------------------
+# Elastic Stack (ECK Custom Resources)
+# -----------------------------------------------------------------------------
+# Disable this whole block (eck.enabled=false) only if you are wiring the demo
+# to an external Elasticsearch cluster you manage outside this chart.
+eck:
+  enabled: true
+  version: "8.17.0"
+
+  # Common name prefix used for the ECK CRs. The Elasticsearch CR will be
+  # named "<naming.stackName>", Kibana the same, APM Server the same.
+  naming:
+    stackName: elastic-stack
+    agentName: elastic-agent
+
+  elasticsearch:
+    nodeCount: 3
+    storage:
+      size: 50Gi
+      storageClassName: ""    # empty = cluster default
+    resources:
+      requests:
+        memory: 2Gi
+        cpu: 500m
+      limits:
+        memory: 4Gi
+        cpu: "2"
+
+  kibana:
+    replicas: 1
+    resources:
+      requests:
+        memory: 512Mi
+        cpu: 250m
+      limits:
+        memory: 1Gi
+        cpu: "1"
+    route:
+      enabled: true
+      tls:
+        # Kibana terminates HTTPS itself with ECK's self-signed cert; we use
+        # passthrough so the user trusts the same cert (and gets HSTS, etc.).
+        termination: passthrough
+
+  # APM Server receives OTLP from payment-service. TLS is disabled on the
+  # APM HTTP endpoint to keep in-cluster traffic simple — replace with your
+  # own cert/CA workflow if your security posture requires mTLS internally.
+  apm:
+    enabled: true
+    replicas: 1
+    httpTLS: false
+    resources:
+      requests:
+        memory: 512Mi
+        cpu: 100m
+      limits:
+        memory: 1Gi
+        cpu: "1"
+
+  # Elastic Agent collects K8s metrics, container logs, and events.
+  # Requires ClusterRole — not compatible with Developer Sandbox.
+  agent:
+    enabled: true
+    resources:
+      requests:
+        memory: 512Mi
+        cpu: 200m
+      limits:
+        memory: 1Gi
+        cpu: "1"
+
+# -----------------------------------------------------------------------------
+# OpenTelemetry / payment-service ingestion
+# -----------------------------------------------------------------------------
+# When eck.apm.enabled=true the chart wires payment-service to the in-cluster
+# APM Server automatically. To override (e.g. ship to an external endpoint
+# instead), set otel.endpoint and otel.headers — these win over the in-cluster
+# APM defaults.
+otel:
+  endpoint: ""
+  headers: ""
+
+# -----------------------------------------------------------------------------
+# payment-service: synthetic FastAPI app with controllable failure injection
+# -----------------------------------------------------------------------------
+paymentService:
+  enabled: true
+  replicas: 2
+  image:
+    # Defaults to the OpenShift internal registry path produced by `oc new-build`.
+    repository: ""
+    tag: latest
+    pullPolicy: Always
+  service:
+    port: 8080
+  route:
+    enabled: true
+    tls:
+      termination: edge
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# -----------------------------------------------------------------------------
+# payment-loadgen: continuous traffic generator
+# -----------------------------------------------------------------------------
+paymentLoadgen:
+  enabled: true
+  replicas: 1
+  image:
+    repository: ""
+    tag: latest
+    pullPolicy: Always
+  requestsPerSecond: 2
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# -----------------------------------------------------------------------------
+# remediation-agent: A2A-protocol agent that executes K8s remediation actions
+# -----------------------------------------------------------------------------
+remediationAgent:
+  enabled: true
+  replicas: 1
+  image:
+    repository: ""
+    tag: latest
+    pullPolicy: Always
+  service:
+    port: 8080
+  route:
+    enabled: true
+    tls:
+      termination: edge
+  config:
+    agentName: openshift-remediation-agent
+    allowedNamespaces: ""    # empty = release namespace
+    dryRun: false
+    logLevel: INFO
+  rbac:
+    create: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi

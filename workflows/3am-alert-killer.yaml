@@ -1,0 +1,184 @@
+version: "1"
+name: The 3am Alert Killer
+description: Autonomous SRE pipeline. On alert it enriches with K8s events and
+  logs, performs AI-driven root cause analysis, creates an Elastic case,
+  dispatches remediation via A2A, and verifies the fix.
+enabled: true
+
+tags:
+  - openshift
+  - rca
+  - remediation
+  - a2a
+  - observability
+  - 3am-alert-killer
+
+triggers:
+  - type: alert
+
+steps:
+  - name: enrich_events
+    type: elasticsearch.search
+    with:
+      index: metrics-kubernetes.event-default
+      size: 30
+      query:
+        bool:
+          must:
+            - range:
+                "@timestamp":
+                  gte: now-30m
+          should:
+            - match:
+                kubernetes.event.reason: BackOff
+            - match:
+                kubernetes.event.reason: Failed
+            - match:
+                kubernetes.event.reason: Unhealthy
+            - match:
+                kubernetes.event.reason: OOMKilling
+            - match:
+                kubernetes.event.reason: Evicted
+          minimum_should_match: 1
+
+  - name: enrich_logs
+    type: elasticsearch.search
+    with:
+      index: logs-kubernetes.container_logs-default
+      size: 50
+      query:
+        bool:
+          must:
+            - range:
+                "@timestamp":
+                  gte: now-30m
+          should:
+            - match_phrase:
+                message: OutOfMemoryError
+            - match_phrase:
+                message: OOMKilled
+            - match_phrase:
+                message: error
+            - match_phrase:
+                message: fatal
+            - match_phrase:
+                message: timeout
+          minimum_should_match: 1
+
+  - name: rca_analysis
+    type: ai.prompt
+    connector-id: AI_CONNECTOR_ID
+    with:
+      prompt: |
+        You are an expert Site Reliability Engineer at FinTechCo, a digital payments platform. Perform root cause analysis on this OpenShift Kubernetes alert for the payment-service.
+
+        ## Alert Event
+        {{ event | json }}
+
+        ## Related Kubernetes Events (last 30 minutes)
+        {{ steps.enrich_events.output.hits.hits | json }}
+
+        ## Related Pod Logs (last 30 minutes)
+        {{ steps.enrich_logs.output.hits.hits | json }}
+
+        Analyze the alert, correlated Kubernetes events, and pod logs. Output a JSON object with these fields:
+        - "root_cause": Clear explanation referencing specific log lines or events
+        - "impact": Business impact statement
+        - "severity": One of "critical", "high", "medium", "low"
+        - "recommended_actions": Array of specific remediation steps
+        - "summary": One paragraph incident summary
+        - "affected_pod": The pod name from the events
+        - "affected_namespace": The namespace from the events
+        - "affected_deployment": The deployment name (pod name without last two hyphen-segments)
+
+        Output ONLY valid JSON, no markdown fences.
+
+  - name: extract_case_metadata
+    type: ai.prompt
+    connector-id: AI_CONNECTOR_ID
+    with:
+      prompt: |
+        From this RCA, output ONLY a JSON object with:
+        - "title": Concise case title under 80 chars like "[RCA] OOMKilled - payment-service/NAMESPACE"
+        - "severity": One of "critical", "high", "medium", "low"
+
+        RCA: {{ steps.rca_analysis.output.content }}
+
+        Output ONLY JSON.
+
+  - name: determine_action
+    type: ai.prompt
+    connector-id: AI_CONNECTOR_ID
+    with:
+      prompt: |
+        Based on this RCA, determine the single best remediation action.
+
+        RCA: {{ steps.rca_analysis.output.content }}
+
+        Output ONE of these JSON formats:
+        {"action":"restart_deployment","namespace":"NAMESPACE","deployment_name":"<name>"}
+        {"action":"scale_deployment","namespace":"NAMESPACE","deployment_name":"<name>","replicas":<n>}
+        {"action":"rollback_deployment","namespace":"NAMESPACE","deployment_name":"<name>"}
+
+        Rules: OOMKilled -> restart_deployment. High latency -> scale_deployment. Bad deploy -> rollback_deployment.
+        Derive deployment name from pod name by removing last two hyphen-segments.
+        Output ONLY JSON.
+
+  - name: create_case
+    type: kibana.request
+    with:
+      method: POST
+      path: /api/cases
+      headers:
+        kbn-xsrf: "true"
+      body:
+        title: "{{ steps.extract_case_metadata.output.content }}"
+        description: "{{ steps.rca_analysis.output.content }}"
+        owner: observability
+        tags:
+          - auto-rca
+          - 3am-alert-killer
+          - kubernetes
+          - payment-service
+        severity: low
+        connector:
+          id: none
+          name: none
+          type: .none
+          fields: null
+        settings:
+          syncAlerts: false
+
+  - name: send_remediation
+    type: http
+    with:
+      url: REMEDIATION_AGENT_URL
+      method: POST
+      headers:
+        Content-Type: application/json
+      body: '{"jsonrpc":"2.0","id":"3am-remediate","method":"tasks/send","params":{"id":"3am-remediate","message":{"role":"user","parts":[{"type":"text","text":"{{ steps.determine_action.output.content }}"}]},"metadata":{"source":"elastic-workflow"}}}'
+    on-failure:
+      continue: true
+
+  - name: verify_remediation
+    type: http
+    with:
+      url: REMEDIATION_AGENT_URL
+      method: POST
+      headers:
+        Content-Type: application/json
+      body: '{"jsonrpc":"2.0","id":"3am-verify","method":"tasks/send","params":{"id":"3am-verify","message":{"role":"user","parts":[{"type":"text","text":"{\"action\":\"verify_deployment_health\",\"namespace\":\"NAMESPACE\",\"deployment_name\":\"payment-service\"}"}]},"metadata":{"source":"elastic-workflow","verify":true}}}'
+    on-failure:
+      continue: true
+
+  - name: update_case_status
+    type: kibana.request
+    with:
+      method: POST
+      path: /api/cases/{{ steps.create_case.output.id }}/comments
+      headers:
+        kbn-xsrf: "true"
+      body:
+        type: user
+        owner: observability
+        comment: "Remediation dispatched: {{ steps.determine_action.output.content }} Response: {{ steps.send_remediation.output | json }} Verification: {{ steps.verify_remediation.output | json }}"

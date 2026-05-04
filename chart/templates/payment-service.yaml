@@ -1,0 +1,96 @@
+{{- if .Values.paymentService.enabled }}
+{{- $ns := include "easre.namespace" . -}}
+{{- $otelEndpoint := .Values.otel.endpoint -}}
+{{- if and (not $otelEndpoint) .Values.eck.enabled .Values.eck.apm.enabled -}}
+  {{- $otelEndpoint = include "easre.apmEndpoint" . -}}
+{{- end -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-service
+  namespace: {{ $ns }}
+  labels:
+    {{- include "easre.labels" (dict "name" "payment-service" "root" .) | nindent 4 }}
+spec:
+  replicas: {{ .Values.paymentService.replicas }}
+  selector:
+    matchLabels:
+      app: payment-service
+  template:
+    metadata:
+      labels:
+        {{- include "easre.labels" (dict "name" "payment-service" "root" .) | nindent 8 }}
+    spec:
+      containers:
+        - name: payment-service
+          image: {{ include "easre.image" (dict "image" .Values.paymentService.image "ns" $ns "name" "payment-service") }}
+          imagePullPolicy: {{ .Values.paymentService.image.pullPolicy }}
+          ports:
+            - containerPort: 8080
+          env:
+            {{- if $otelEndpoint }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ $otelEndpoint | quote }}
+            {{- end }}
+            {{- if .Values.otel.headers }}
+            - name: OTEL_EXPORTER_OTLP_HEADERS
+              value: {{ .Values.otel.headers | quote }}
+            {{- end }}
+            - name: OTEL_SERVICE_NAME
+              value: payment-service
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "service.namespace={{ $ns }},service.version={{ .Chart.AppVersion }},deployment.environment=demo"
+            - name: OTEL_LOGS_EXPORTER
+              value: otlp
+            - name: OTEL_METRICS_EXPORTER
+              value: otlp
+            - name: OTEL_TRACES_EXPORTER
+              value: otlp
+          resources:
+            {{- toYaml .Values.paymentService.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-service
+  namespace: {{ $ns }}
+  labels:
+    {{- include "easre.labels" (dict "name" "payment-service" "root" .) | nindent 4 }}
+spec:
+  selector:
+    app: payment-service
+  ports:
+    - port: {{ .Values.paymentService.service.port }}
+      targetPort: 8080
+  type: ClusterIP
+{{- if .Values.paymentService.route.enabled }}
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: payment-service
+  namespace: {{ $ns }}
+  labels:
+    {{- include "easre.labels" (dict "name" "payment-service" "root" .) | nindent 4 }}
+spec:
+  to:
+    kind: Service
+    name: payment-service
+  port:
+    targetPort: 8080
+  tls:
+    termination: {{ .Values.paymentService.route.tls.termination }}
+{{- end }}
+{{- end }}

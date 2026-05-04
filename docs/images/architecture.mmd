@@ -1,0 +1,71 @@
+%%{init: {
+  "theme": "base",
+  "themeVariables": {
+    "primaryColor": "#FFFFFF",
+    "primaryBorderColor": "#1A1A1A",
+    "primaryTextColor": "#1A1A1A",
+    "lineColor": "#5A5A5A",
+    "fontFamily": "Inter, Helvetica, Arial, sans-serif",
+    "fontSize": "13px",
+    "clusterBkg": "#FAFAFA",
+    "clusterBorder": "#B0B0B0"
+  },
+  "flowchart": { "curve": "basis", "htmlLabels": true, "padding": 14, "nodeSpacing": 45, "rankSpacing": 55 }
+}}%%
+flowchart TB
+
+    subgraph OS["🔴  OpenShift Cluster — single namespace"]
+        direction TB
+
+        subgraph WL["Demo workloads"]
+            direction LR
+            LG["🔁 payment-loadgen<br/><sub>2 req / s</sub>"]
+            PS["💳 payment-service<br/><sub>FastAPI + OTEL SDK</sub>"]
+            RA["🛡️ remediation-agent<br/><sub>A2A · namespace RBAC</sub>"]
+            LG -- "POST /charge" --> PS
+            RA -- "5b  restart · scale · rollback" --> PS
+        end
+
+        subgraph EC["Elastic Stack — managed by ECK operator"]
+            direction TB
+
+            subgraph IN["Ingest"]
+                direction LR
+                APM["📡 APM Server<br/><sub>OTLP receiver · anonymous</sub>"]
+                EA["📥 Elastic Agent<br/><sub>DaemonSet · k8s metrics + logs + events</sub>"]
+            end
+
+            ES[("📊 Elasticsearch · 3-node cluster")]
+
+            subgraph KB["📊 Kibana"]
+                direction LR
+                ALERTS["🔔 Alert rules<br/><sub>p99 latency · error rate</sub>"]
+                WF["⚙️ Workflow<br/><b>The 3am Alert Killer</b>"]
+                CASE["📋 Elastic Case<br/><sub>RCA · action · verification</sub>"]
+                ALERTS -- "3  fires" --> WF
+                WF -- "4b  open · 7  update" --> CASE
+            end
+
+            APM -- "indexes" --> ES
+            EA -- "indexes" --> ES
+            ES == "2  threshold breached" ==> ALERTS
+        end
+
+        AI["🤖 AI Connector target<br/><sub>OpenShift AI · Granite · Claude · OpenAI</sub>"]
+
+        PS == "1  OTLP" ==> APM
+        WF == "4a  RCA prompt" ==> AI
+        AI == "structured diagnosis" ==> WF
+        WF == "5a  A2A request<br/><sub>action + target</sub>" ==> RA
+        RA == "6  verification" ==> WF
+    end
+
+    classDef elastic     fill:#FED10A,stroke:#1A1A1A,stroke-width:1px,color:#1A1A1A;
+    classDef elasticData fill:#FFF3B3,stroke:#1A1A1A,stroke-width:1px,color:#1A1A1A;
+    classDef openshift   fill:#EE0000,stroke:#1A1A1A,stroke-width:1px,color:#FFFFFF;
+    classDef ai          fill:#7B61FF,stroke:#1A1A1A,stroke-width:1px,color:#FFFFFF;
+
+    class APM,EA,ALERTS,WF,CASE elastic
+    class ES elasticData
+    class PS,LG,RA openshift
+    class AI ai

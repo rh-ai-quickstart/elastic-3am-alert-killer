@@ -1,0 +1,20 @@
+apiVersion: v2
+name: elastic-autonomous-sre
+description: Autonomous SRE pipeline using Elastic Observability and OpenShift AI to perform AI-driven RCA and A2A-protocol remediation for Kubernetes incidents.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - elastic
+  - observability
+  - openshift-ai
+  - aiops
+  - sre
+  - a2a
+  - agentic-ai
+home: https://github.com/rh-ai-quickstart/elastic-autonomous-sre
+sources:
+  - https://github.com/rh-ai-quickstart/elastic-autonomous-sre
+maintainers:
+  - name: rh-ai-quickstart contributors
+icon: https://www.elastic.co/static-res/images/elastic-logo-200.png

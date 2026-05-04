@@ -1,0 +1,31 @@
+{{- if .Values.paymentLoadgen.enabled }}
+{{- $ns := include "easre.namespace" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-loadgen
+  namespace: {{ $ns }}
+  labels:
+    {{- include "easre.labels" (dict "name" "payment-loadgen" "root" .) | nindent 4 }}
+spec:
+  replicas: {{ .Values.paymentLoadgen.replicas }}
+  selector:
+    matchLabels:
+      app: payment-loadgen
+  template:
+    metadata:
+      labels:
+        {{- include "easre.labels" (dict "name" "payment-loadgen" "root" .) | nindent 8 }}
+    spec:
+      containers:
+        - name: loadgen
+          image: {{ include "easre.image" (dict "image" .Values.paymentLoadgen.image "ns" $ns "name" "payment-loadgen") }}
+          imagePullPolicy: {{ .Values.paymentLoadgen.image.pullPolicy }}
+          env:
+            - name: PAYMENT_URL
+              value: "http://payment-service:{{ .Values.paymentService.service.port }}"
+            - name: REQUESTS_PER_SECOND
+              value: {{ .Values.paymentLoadgen.requestsPerSecond | quote }}
+          resources:
+            {{- toYaml .Values.paymentLoadgen.resources | nindent 12 }}
+{{- end }}

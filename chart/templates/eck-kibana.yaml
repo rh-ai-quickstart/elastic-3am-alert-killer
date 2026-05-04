@@ -1,0 +1,43 @@
+{{- if .Values.eck.enabled }}
+{{- $ns := include "easre.namespace" . -}}
+apiVersion: kibana.k8s.elastic.co/v1
+kind: Kibana
+metadata:
+  name: {{ include "easre.stackName" . }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "easre.labels" (dict "name" "kibana" "root" .) | nindent 4 }}
+spec:
+  version: {{ .Values.eck.version | quote }}
+  count: {{ .Values.eck.kibana.replicas }}
+  elasticsearchRef:
+    name: {{ include "easre.stackName" . }}
+  podTemplate:
+    spec:
+      containers:
+        - name: kibana
+          resources:
+            {{- toYaml .Values.eck.kibana.resources | nindent 12 }}
+  http:
+    tls:
+      selfSignedCertificate:
+        disabled: false
+{{- if .Values.eck.kibana.route.enabled }}
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: kibana
+  namespace: {{ $ns }}
+  labels:
+    {{- include "easre.labels" (dict "name" "kibana" "root" .) | nindent 4 }}
+spec:
+  to:
+    kind: Service
+    name: {{ include "easre.stackName" . }}-kb-http
+  port:
+    targetPort: https
+  tls:
+    termination: {{ .Values.eck.kibana.route.tls.termination }}
+{{- end }}
+{{- end }}
