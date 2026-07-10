@@ -218,11 +218,23 @@ In Kibana → **Observability → Alerts → Manage Rules**, create:
 
 ### 7. Deploy the Elastic workflow
 
-Edit `workflows/3am-alert-killer.yaml` and replace the placeholders:
+Edit `workflows/3am-alert-killer.yaml` and replace these three placeholder tokens (they appear multiple times each — replace every occurrence):
 
-- `connector-id` → your AI connector name from step 6
-- `remediation_agent_url` → the in-cluster service URL: `http://remediation-agent.<your-namespace>.svc.cluster.local:8080`
-- `app_namespace` → your OpenShift namespace
+- `AI_CONNECTOR_ID` → the ID of your AI connector from step 6. Find it in Kibana → **Stack Management → Connectors** → open the connector; the ID is in the URL and on the connector detail page.
+- `REMEDIATION_AGENT_URL` → the in-cluster service URL: `http://remediation-agent.<your-namespace>.svc.cluster.local:8080`
+- `NAMESPACE` → your OpenShift namespace (e.g. `easre`)
+
+A quick way to fill them in from the repo root:
+
+```bash
+sed -i '' \
+  -e "s|AI_CONNECTOR_ID|<your-connector-id>|g" \
+  -e "s|REMEDIATION_AGENT_URL|http://remediation-agent.${NAMESPACE}.svc.cluster.local:8080|g" \
+  -e "s|NAMESPACE|${NAMESPACE}|g" \
+  workflows/3am-alert-killer.yaml
+```
+
+> Replace `NAMESPACE` **last**, as shown above, so it doesn't partially match the other tokens. Then open the file and confirm all three are filled in before applying.
 
 Apply via the Kibana API. Mint an Elasticsearch API key first (Kibana → **Stack Management → API keys → Create API key**):
 
