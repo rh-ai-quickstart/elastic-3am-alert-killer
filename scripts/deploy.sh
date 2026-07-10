@@ -86,4 +86,5 @@ if [[ -n "${KIBANA_HOST}" ]]; then
   echo ""
 fi
 
-echo "Done. See README step 5+ to configure the AI connector and workflow."
+echo "Done. See README step 5+ to start the trial license (make start-trial),"
+echo "then configure the AI connector and workflow."

@@ -10,15 +10,16 @@ Eliminate 3am firefighting with AI-driven root cause analysis and A2A-protocol r
 - [Requirements](#requirements)
   - [Minimum hardware requirements](#minimum-hardware-requirements)
   - [Minimum software requirements](#minimum-software-requirements)
-  - [Required accounts](#required-accounts)
+  - [Required user permissions](#required-user-permissions)
 - [Deploy](#deploy)
   - [1. Log into OpenShift](#1-log-into-openshift)
   - [2. Install the ECK operator](#2-install-the-eck-operator-cluster-admin-one-time)
   - [3. Build the application images](#3-build-the-application-images)
   - [4. Install the Helm chart](#4-install-the-helm-chart)
-  - [5. Set up Kibana, the AI connector, and alerts](#5-set-up-kibana-the-ai-connector-and-alerts)
-  - [6. Deploy the Elastic workflow](#6-deploy-the-elastic-workflow)
-  - [7. Run the demo](#7-run-the-demo)
+  - [5. Start the 30-day Elastic trial license](#5-start-the-30-day-elastic-trial-license)
+  - [6. Set up Kibana, the AI connector, and alerts](#6-set-up-kibana-the-ai-connector-and-alerts)
+  - [7. Deploy the Elastic workflow](#7-deploy-the-elastic-workflow)
+  - [8. Run the demo](#8-run-the-demo)
   - [Delete](#delete)
   - [Makefile shortcuts](#makefile-shortcuts)
 - [Repository Structure](#repository-structure)
@@ -74,8 +75,9 @@ ECK runs a 3-node Elasticsearch cluster plus Kibana, APM Server, and a per-node 
 | ECK operator | 2.13+ | Installed via OperatorHub / OLM. See deploy step 2. |
 | `curl` | any | For triggering failure scenarios and testing endpoints. |
 | `python3` | 3.11+ | Optional, for local development of the agents. |
+| Elastic trial license | 30-day trial | The AI Connector and Elastic Workflows require subscription features. Self-activated in [deploy step 5](#5-start-the-30-day-elastic-trial-license); no Elastic account or signup needed. |
 
-### Required accounts
+### Required user permissions
 
 - **Red Hat account** with **cluster-admin** access to install the ECK operator. Operator installation is a one-time, cluster-wide step that can be performed by a platform team and reused across many quickstart deployments.
 - **LLM access**, one of:
@@ -83,7 +85,7 @@ ECK runs a 3-node Elasticsearch cluster plus Kibana, APM Server, and a per-node 
   - Any OpenAI-compatible inference endpoint reachable from inside the cluster.
   - An external SaaS endpoint (Anthropic, OpenAI, Azure OpenAI). Egress required.
 
-> No Elastic Cloud account is required — Elasticsearch and Kibana run inside your OpenShift cluster.
+> No Elastic Cloud account is required — Elasticsearch and Kibana run inside your OpenShift cluster. The subscription features this demo uses (AI Connector, Elastic Workflows) are unlocked with a self-activated 30-day trial license in [deploy step 5](#5-start-the-30-day-elastic-trial-license); no signup or license key needed.
 
 ## Deploy
 
@@ -160,12 +162,52 @@ oc logs -l app=payment-service --tail=20 | grep -i otel
 
 You should see traces appearing within ~30 s in Kibana → **Observability → APM → Services**.
 
-### 5. Set up Kibana, the AI connector, and alerts
+### 5. Start the 30-day Elastic trial license
+
+ECK deploys Elasticsearch with the free **Basic** license. The AI Connector (step 6) and Elastic Workflows (step 7) require subscription features, so start the built-in 30-day trial before continuing. The trial unlocks all subscription features, requires no Elastic account, and is activated directly against your in-cluster Elasticsearch using the [start trial API](https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-license-post-start-trial).
+
+**Option A — Kibana UI.** Log into Kibana with the credentials from step 4, then go to **Stack Management → License Management** and click **Start a 30-day trial**.
+
+**Option B — API.** Elasticsearch is not exposed via a route, so port-forward to it and call the API as the `elastic` user. The `acknowledge=true` parameter is required:
+
+```bash
+oc port-forward service/elastic-stack-es-http 9200:9200 >/dev/null 2>&1 &
+PF_PID=$!
+sleep 3
+
+curl -sk -u "elastic:${KIBANA_PASS}" -X POST \
+  "https://localhost:9200/_license/start_trial?acknowledge=true"
+
+kill $PF_PID
+```
+
+Or simply:
+
+```bash
+make start-trial
+```
+
+A successful response looks like:
+
+```json
+{"acknowledged": true, "trial_was_started": true}
+```
+
+You can confirm the active license at any time with `GET /_license` (via the same port-forward, or Kibana → **Dev Tools**) — `license.type` should now be `trial`.
+
+> **Trial notes:**
+> - The trial lasts **30 days**. When it expires the cluster reverts to Basic — your data is untouched, but the AI Connector and Workflows stop working. Extended trials are available at [elastic.co/trialextension](https://www.elastic.co/trialextension).
+> - Elasticsearch allows **one trial per major version**. If the response says `"trial_was_started": false` with an error message, this cluster has already consumed its trial. Since this quickstart creates a fresh Elasticsearch cluster, a new deployment always has a fresh trial available.
+> - The API call requires the `manage` cluster privilege; the built-in `elastic` superuser used above has it.
+
+### 6. Set up Kibana, the AI connector, and alerts
 
 In Kibana → **Stack Management → Connectors**, create an AI connector:
 - Type: **OpenAI** (compatible) for IBM Granite served via OpenShift AI, or **Anthropic** / **OpenAI** for SaaS models.
 - For OpenShift AI Granite, the URL is the in-cluster route to your model serving runtime (e.g. `https://granite-7b.<ai-namespace>.svc.cluster.local:8080/v1`).
 - Note the connector name — you'll reference it in the workflow YAML.
+
+> If the AI connector types don't appear, the trial license from step 5 hasn't been activated — go back and start it first.
 
 In Kibana → **Observability → Alerts → Manage Rules**, create:
 
@@ -174,11 +216,11 @@ In Kibana → **Observability → Alerts → Manage Rules**, create:
 | Payment Service – High p99 Latency | APM Transaction Duration | p99 > 3000ms | 2 min |
 | Payment Service – Error Rate Spike | APM Transaction Error Rate | > 10 % | 2 min |
 
-### 6. Deploy the Elastic workflow
+### 7. Deploy the Elastic workflow
 
 Edit `workflows/3am-alert-killer.yaml` and replace the placeholders:
 
-- `connector-id` → your AI connector name from step 5
+- `connector-id` → your AI connector name from step 6
 - `remediation_agent_url` → the in-cluster service URL: `http://remediation-agent.<your-namespace>.svc.cluster.local:8080`
 - `app_namespace` → your OpenShift namespace
 
@@ -196,7 +238,7 @@ curl -sk -X POST "${KIBANA_URL}/api/workflows?overwrite=true" \
 
 Or paste the YAML directly into **Kibana → Workflows → Create new workflow**.
 
-### 7. Run the demo
+### 8. Run the demo
 
 **Steady state.** Open Kibana → **APM → Services → payment-service**. You should see traffic at ~55 ms p99.
 
@@ -254,6 +296,7 @@ The repo ships with a Makefile that wraps the entire lifecycle. Run `make help` 
 make eck-operator       # apply manifests/eck-operator.yaml + wait for CRDs
 make deploy             # build images + helm install + show status
 make kibana-creds       # print Kibana URL, user, and password
+make start-trial        # start the 30-day Elasticsearch trial license (deploy step 5)
 make inject-latency     # fire the demo (DELAY_MS=8000 to override)
 make inject-oom         # alternate failure mode
 make logs-agent         # tail the remediation-agent

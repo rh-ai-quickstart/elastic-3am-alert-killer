@@ -102,6 +102,15 @@ kibana-creds: ## Print Kibana URL + elastic user password
 	@echo "user: elastic"
 	@echo "pass: $(KIBANA_PASS)"
 
+.PHONY: start-trial
+start-trial: ## Start the 30-day Elasticsearch trial license (required for AI connector + workflows)
+	@echo "Starting 30-day trial license on $(STACK_NAME)..."
+	@oc port-forward -n $(NAMESPACE) service/$(STACK_NAME)-es-http 9200:9200 >/dev/null 2>&1 & \
+	PF=$$!; sleep 3; \
+	curl -sk -u "elastic:$(KIBANA_PASS)" -X POST "https://localhost:9200/_license/start_trial?acknowledge=true"; echo ""; \
+	curl -sk -u "elastic:$(KIBANA_PASS)" "https://localhost:9200/_license?filter_path=license.type,license.expiry_date"; echo ""; \
+	kill $$PF 2>/dev/null || true
+
 ##@ Demo
 
 .PHONY: inject-latency
