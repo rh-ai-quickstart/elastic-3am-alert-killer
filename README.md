@@ -1,6 +1,6 @@
 # Deploy Autonomous SRE with Elastic and OpenShift AI
 
-Eliminate 3am firefighting with AI-driven root cause analysis and A2A-protocol remediation, running entirely on OpenShift with the Elastic Stack via ECK.
+Eliminate 3am firefighting when payments fail: AI-driven root cause analysis and A2A-protocol remediation on OpenShift with the Elastic Stack via ECK.
 
 ## Table of Contents
 
@@ -359,11 +359,8 @@ make diagram            # render docs/images/architecture.mmd to PNG
 
 ## Tags
 
-| Tag | Value |
-|-----|-------|
-| **Industry** | Financial Services |
-| **Product** | OpenShift AI, OpenShift |
-| **Partners** | Elastic |
-| **Use case** | Autonomous SRE, Incident Response, AIOps |
-| **Business challenge** | Operational Efficiency, Mean Time to Resolution |
-| **Topic** | Observability, Agentic AI, Multi-Agent Systems |
+* **Industry:** Banking and securities
+* **Product:**  OpenShift AI, OpenShift 
+* **Partners:** Elastic
+* **Use case:** Autonomous SRE, Incident Response, AIOps 
+* **Topic:** Observability, Agentic AI, Multi-Agent Systems 
